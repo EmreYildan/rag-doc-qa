@@ -1,0 +1,81 @@
+Test PDF: YazLab II - 2526B - Proje I.pdf
+Chunk size: 500 
+Chunk overlap: 100
+Chunk count: 27
+
+
+TEST SONUÇLARI
+
+Soru 1: Proje Konusu nedir?
+Sonuç:Yanlış
+
+Soru 2: Öğrencilerden proje için ne beklenmektedir?
+Sonuç: Kısmen
+
+Soru 3: Proje teslimi hakkında ne söylenmektedir?
+Sonuç:Yanlış
+
+Soru 4: Sunum yapmayan öğrenciler için ne olacak?
+Sonuç: Doğru
+
+Soru 5: Proje raporu hakkında ne belirtilmiştir?
+Sonuç: Kısmen
+
+CHUNK SIZE TEST
+
+TEST 1
+oru 3: Proje teslimi hakkında ne söylenmektedir?
+Sonuç:Yanlış
+
+Soru 4: Sunum yapmayan öğrenciler için ne olacak?
+Sonuç: Doğru
+
+Soru 5: Proje raporu hakkında ne belirtilmiştir?
+Sonuç: Kısmen
+
+TEST 2
+
+chunk_size=500-----27
+
+Soru 1: Proje Konusu nedir?
+Sonuç:Yanlış
+
+Soru 2: Öğrencilerden proje için ne beklenmektedir?
+Sonuç: Kısmen
+
+Soru 3: Proje teslimi hakkında ne söylenmektedir?
+Sonuç:Yanlış
+
+Soru 4: Sunum yapmayan öğrenciler için ne olacak?
+Sonuç: Doğru
+
+Soru 5: Proje raporu hakkında ne belirtilmiştir?
+Sonuç: Kısmen
+
+TEST 3
+
+chunk_size = 1000-----14
+
+Soru 1: Proje Konusu nedir?
+Sonuç:Yanlış
+
+Soru 2: Öğrencilerden proje için ne beklenmektedir?
+Sonuç: Kısmen
+
+Soru 3: Proje teslimi hakkında ne söylenmektedir?
+Sonuç:Yanlış
+
+Soru 4: Sunum yapmayan öğrenciler için ne olacak?
+Sonuç: Kısmen
+
+Soru 5: Proje raporu hakkında ne belirtilmiştir?
+Sonuç: Kısmen
+chunk_size=300 ----53
+
+Soru 1: Proje Konusu nedir?
+Sonuç: Kısmen
+
+Soru 2: Öğrencilerden proje için ne beklenmektedir?
+Sonuç: Kısmen
+
+S
