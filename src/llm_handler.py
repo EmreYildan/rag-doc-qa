@@ -7,41 +7,34 @@ Aşama 2: OpenAI API ve AWS Bedrock
 
 def generate_answer_mock(question: str, retrieved_docs: list) -> str:
     """
-    Mock LLM - test amaçlı basit cevap oluşturma
-    
-    Args:
-        question: Kullanıcı sorusu
-        retrieved_docs: İlgili doküman parçaları
-        
-    Returns:
-        Oluşturulan cevap
+    Mock cevap üretici.
+    Gerçek LLM kullanmadan, en alakalı ilk doküman parçasına göre
+    düzenli bir test cevabı oluşturur.
     """
     try:
         if not retrieved_docs:
-            return f"Maalesef, '{question}' sorusuna cevap bulunamamıştır."
-        
-        # Çoklu kaynakları, skoru da göstererek birleştir
-        combined_parts = []
-        for doc in retrieved_docs:
-            score = doc.metadata.get("score") if hasattr(doc, "metadata") else None
-            if score is not None:
-                combined_parts.append(f"[skor: {score:.4f}] {doc.page_content}")
-            else:
-                combined_parts.append(doc.page_content)
-        combined_context = "\n\n".join(combined_parts)
-        
-        # Mock answer generator
-        answer = f"""
-Sorunuz: {question}
+            return f"Bu soruya uygun bilgi bulunamadı: '{question}'"
 
-Bulunan Bilgi:
-{combined_context[:500]}...
+        top_doc = retrieved_docs[0].page_content.strip()
+        top_doc = " ".join(top_doc.split())
 
-Not: Bu bir test cevabıdır. Aşama 2'de OpenAI API veya AWS Bedrock ile gerçek AI cevaplar alacaksınız.
-"""
-        
-        return answer.strip()
-        
+        score = None
+        if hasattr(retrieved_docs[0], "metadata") and retrieved_docs[0].metadata:
+            score = retrieved_docs[0].metadata.get("score")
+
+        if len(top_doc) > 400:
+            top_doc = top_doc[:400] + "..."
+
+        answer = "Dokümanda soruya en yakın bulunan bilgi:\n\n"
+        answer += top_doc
+
+        if score is not None:
+            answer += f"\n\nBenzerlik skoru: {score:.4f}"
+
+        answer += "\n\nNot: Bu hâlâ test amaçlı mock cevaptır. Gerçek AI cevabı sonraki aşamada eklenecektir."
+
+        return answer
+
     except Exception as e:
         raise Exception(f"Cevap oluşturulurken hata: {str(e)}")
 
@@ -101,3 +94,92 @@ Yukarıdaki bilgilere dayanarak soruyu Türkçe olarak cevapla."""
         raise Exception("OpenAI paketi kurulu değil. 'pip install openai' çalıştırın.")
     except Exception as e:
         raise Exception(f"OpenAI API çağrısında hata: {str(e)}")
+
+
+def generate_answer_bedrock(question: str, retrieved_docs: list) -> str:
+    """
+    AWS Bedrock Claude 3 Haiku ile cevap üretir.
+    """
+
+    try:
+        import os
+        import boto3
+        from dotenv import load_dotenv
+
+        load_dotenv()
+
+        if not retrieved_docs:
+            return "Bu soruya uygun kaynak bulunamadı."
+
+        # .env ayarları
+        region = os.getenv("AWS_REGION", "eu-west-1")
+
+        model_id = os.getenv(
+            "BEDROCK_MODEL_ID",
+            "anthropic.claude-3-haiku-20240307-v1:0"
+        )
+
+        max_tokens = int(os.getenv("BEDROCK_MAX_TOKENS", "200"))
+        temperature = float(os.getenv("BEDROCK_TEMPERATURE", "0.2"))
+
+        # Context oluştur
+        context_parts = []
+
+        for i, doc in enumerate(retrieved_docs[:3], start=1):
+
+            text = " ".join(doc.page_content.split())
+
+            context_parts.append(
+                f"Kaynak {i}:\n{text[:2000]}"
+            )
+
+        context = "\n\n".join(context_parts)
+
+        # Prompt
+        prompt = f"""
+Kurallar:
+- Sadece verilen doküman bilgilerine dayan.
+- Eğer cevap dokümanda yoksa bunu açıkça belirt.
+- Dokümanda numaralı veya maddeli bir liste varsa, listedeki tüm maddeleri eksiksiz aktar.
+- Liste sorularında madde atlama, özetleme yapma.
+- Cevabı dokümandaki sıraya göre ver.
+- Bilgi eksik görünüyorsa "Bağlamda yalnızca şu maddeler bulunuyor" diye belirt.
+
+Doküman:
+{context}
+
+Soru:
+{question}
+"""
+
+        # Bedrock client
+        client = boto3.client(
+            "bedrock-runtime",
+            region_name=region
+        )
+
+        # Model çağrısı
+        response = client.converse(
+            modelId=model_id,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "text": prompt
+                        }
+                    ]
+                }
+            ],
+            inferenceConfig={
+                "maxTokens": max_tokens,
+                "temperature": temperature
+            }
+        )
+
+        answer = response["output"]["message"]["content"][0]["text"]
+
+        return answer
+
+    except Exception as e:
+        raise Exception(f"Bedrock cevap hatası: {str(e)}")
