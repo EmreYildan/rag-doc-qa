@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
+from src.s3_handler import upload_file_to_s3
+
 
 from src.rag_pipeline import build_index, ask_question
 from src.llm_handler import generate_answer_mock
@@ -31,11 +33,60 @@ if "experiment_logs" not in st.session_state:
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Ayarlar")
-    chunk_size = st.slider("Chunk Boyutu", 200, 1000, 500, step=100)
-    chunk_overlap = st.slider("Chunk Overlap", 0, 200, 100, step=50)
-    top_k = st.slider("Döndürülecek Sonuç Sayısı", 1, 10, 3)
 
-    st.divider()
+    answer_mode = st.selectbox(
+        "Cevap Modu",
+        ["Hızlı", "Dengeli", "Detaylı"]
+    )
+
+    if answer_mode == "Hızlı":
+        chunk_size = 300
+        chunk_overlap = 100
+        top_k = 3
+        search_type = "similarity"
+
+    elif answer_mode == "Dengeli":
+        chunk_size = 500
+        chunk_overlap = 150
+        top_k = 5
+        search_type = "mmr"
+
+    elif answer_mode == "Detaylı":
+        chunk_size = 800
+        chunk_overlap = 200
+        top_k = 8
+        search_type = "mmr"
+    manual_search_type = st.selectbox(
+        "Deneysel Arama Yöntemi",
+        ["Otomatik", "keyword", "similarity", "mmr"]
+    )
+    search_explanations = {
+        "Otomatik": "Seçilen cevap moduna göre sistem en uygun arama yöntemini otomatik belirler.",
+        "keyword": "Anahtar kelime araması yapar. Soru içindeki kelimeler dokümanda birebir aranır. Basittir ama anlam benzerliğini yakalayamaz.",
+        "similarity": "Semantik benzerlik araması yapar. Sorunun anlamına en yakın doküman parçalarını getirir.",
+        "mmr": "MMR araması yapar. Hem alakalı hem de birbirinden farklı parçaları getirir. Uzun dokümanlarda daha kapsamlı cevaplar için daha uygundur."
+    }
+
+
+    if manual_search_type != "Otomatik":
+        search_type = manual_search_type
+
+       
+
+    st.caption(f"ℹ️ {search_explanations[manual_search_type]}")
+
+
+    st.info(
+        f"""
+    Cevap Modu: {answer_mode}
+    Chunk Size: {chunk_size}
+    Chunk Overlap: {chunk_overlap}
+    Top-k: {top_k}
+    Arama: {search_type}
+
+    Not: Chunk ayarları değişirse PDF'yi tekrar işlemeniz gerekir.
+    """
+    )
 
     st.header("🔑 LLM Seçimi")
     llm_option = st.radio(
@@ -78,7 +129,13 @@ if uploaded_file is not None:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                     tmp_file.write(uploaded_file.read())
                     tmp_path = tmp_file.name
+                s3_result = upload_file_to_s3(tmp_path, uploaded_file.name)
 
+                if s3_result["success"]:
+                    st.info(f"☁️ PDF AWS S3'e yüklendi: {s3_result['s3_uri']}")
+                else:
+                    st.warning(f"⚠️ S3 yükleme başarısız: {s3_result['error']}")
+                    
                 result = build_index(
                     tmp_path,
                     chunk_size=chunk_size,
@@ -121,10 +178,11 @@ if st.button("Cevabını Al 🔍", key="answer_btn"):
         try:
             with st.spinner("🤔 İlgili doküman parçaları aranıyor..."):
                 retrieved_docs = ask_question(
-                    st.session_state.vector_store,
-                    question,
-                    k=top_k
-                )
+                st.session_state.vector_store,
+                question,
+                k=top_k,
+                search_type=search_type
+            )
 
             if not retrieved_docs:
                 st.info("Hiç sonuç bulunamadı.")
@@ -179,12 +237,15 @@ if st.button("Cevabını Al 🔍", key="answer_btn"):
                         "Doküman": st.session_state.document_name,
                         "Soru": question,
                         "Model": llm_option,
+                        "Cevap Modu": answer_mode,
                         "Chunk Size": chunk_size,
                         "Chunk Overlap": chunk_overlap,
                         "Top-k": top_k,
+                        "Arama Yöntemi": search_type,
                         "Chunk Sayısı": st.session_state.chunk_count,
                         "Cevap Süresi (sn)": round(elapsed_time, 2),
-                        "Kaynak Sayısı": len(retrieved_docs)
+                        "Kaynak Sayısı": len(retrieved_docs),
+                        "Doğruluk": "Değerlendirilmedi"
                     })
 
                     with st.expander("📚 Kaynaklar", expanded=False):
@@ -205,6 +266,8 @@ if st.button("Cevabını Al 🔍", key="answer_btn"):
 
                                 if score is not None:
                                     st.caption(f"Skor: {score:.4f}")
+                                    if hasattr(doc, "metadata") and doc.metadata.get("search_type"):
+                                        st.caption(f"Arama Yöntemi: {doc.metadata.get('search_type')}")
                                 elif hasattr(doc, "metadata") and doc.metadata:
                                     st.caption(f"Metadata: {doc.metadata}")
 
@@ -225,6 +288,18 @@ if st.session_state.experiment_logs:
         df,
         use_container_width=True
     )
+    st.subheader("✅ Son Cevap Doğruluk Değerlendirmesi")
+
+    accuracy_value = st.selectbox(
+        "Son cevabın doğruluğunu seçin",
+        ["Değerlendirilmedi", "Doğru", "Kısmen Doğru", "Yanlış"]
+    )
+
+    if st.button("Son Kaydı Güncelle"):
+        if st.session_state.experiment_logs:
+            st.session_state.experiment_logs[-1]["Doğruluk"] = accuracy_value
+            st.success(f"Son kayıt '{accuracy_value}' olarak güncellendi.")
+            st.rerun()
 
     if len(df) > 1:
         st.subheader("📈 Cevap Süresi Grafiği")

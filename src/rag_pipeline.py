@@ -1,7 +1,8 @@
 from src.pdf_reader import read_pdf
 from src.splitter import split_text
 from src.embedder import get_embedding_model
-from src.retriever import create_vector_store, search_similar_chunks
+from src.retriever import create_vector_store
+from src.retriever import search_similar_chunks
 
 
 def build_index(pdf_path, chunk_size=500, chunk_overlap=100):
@@ -37,17 +38,26 @@ def build_index(pdf_path, chunk_size=500, chunk_overlap=100):
         raise Exception(f"Index oluşturulurken hata: {str(e)}")
 
 
-def ask_question(vector_store, question, k=3):
+def ask_question(vector_store, question, k=3, search_type="similarity"):
     """
-    Soruya cevap bul ve ilgili doküman parçalarını döndür
+    Soruya göre ilgili doküman parçalarını getirir.
+
+    search_type:
+    - similarity
+    - mmr
     """
     try:
         if not question.strip():
             raise ValueError("Soru boş olamaz")
-        
-        docs = search_similar_chunks(vector_store, question, k=k)
-        
+
+        docs = search_similar_chunks(
+            vector_store=vector_store,
+            query=question,
+            k=k,
+            search_type=search_type
+        )
+
         return docs
-        
+
     except Exception as e:
         raise Exception(f"Soru cevaplanırken hata: {str(e)}")
