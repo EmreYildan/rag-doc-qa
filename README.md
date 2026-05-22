@@ -581,3 +581,13 @@ AWS_S3_BUCKET_NAME=<bucket-name>
 * CSV export
 * Doğruluk değerlendirme
 * Streamlit web arayüzü
+
+# 16. PROJE TEST KISMI 
+
+Projeyi test etmek için kullanılan PDF:
+
+[Hukuk Raporunu Aç](docs/Resmi_Gazete.pdf)
+
+- 1.Soru Düzenlemenin uygulanmasından hangi kurum sorumludur?
+- 2.Soru Düzenlemede geçen geçici maddeler nelerdir?
+- 3.Soru Yönetmelikte hangi tanımlar yapılmıştır?
