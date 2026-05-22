@@ -586,7 +586,9 @@ AWS_S3_BUCKET_NAME=<bucket-name>
 
 Projeyi test etmek için kullanılan PDF:
 
-[Hukuk Raporunu Aç](docs/Resmi_Gazete.pdf)
+```md
+[PDF'i Aç](data/sample_pdfs/hukuk.pdf)
+```
 
 - 1.Soru Düzenlemenin uygulanmasından hangi kurum sorumludur?
 - 2.Soru Düzenlemede geçen geçici maddeler nelerdir?
