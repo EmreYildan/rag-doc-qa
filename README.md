@@ -589,8 +589,7 @@ Projeyi test etmek için kullanılan PDF:
 ## Sample PDF
 
 
-[PDF'i Aç](data/sample_pdfs/resmi_gazete.pdf)
-
+[PDF'i Aç](https://raw.githubusercontent.com/EmreYildan/rag-doc-qa/main/data/sample_pdfs/resmi_gazete.pdf)
 
 - 1.Soru Düzenlemenin uygulanmasından hangi kurum sorumludur?
 - 2.Soru Düzenlemede geçen geçici maddeler nelerdir?
