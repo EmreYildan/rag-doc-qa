@@ -2,19 +2,65 @@ import streamlit as st
 import tempfile
 import os
 import time
-from pathlib import Path
+import re
 import pandas as pd
 import matplotlib.pyplot as plt
+
 from src.s3_handler import upload_file_to_s3
-
-
 from src.rag_pipeline import build_index, ask_question
 from src.llm_handler import generate_answer_mock
+
+def calculate_confidence(retrieved_docs, search_type):
+    """
+    Basit güven skoru hesaplama.
+    """
+
+    if not retrieved_docs:
+        return 0
+
+    base_score = 50
+
+    # Arama yöntemine göre
+    if search_type == "keyword":
+        base_score += 20
+
+    elif search_type == "similarity":
+        base_score += 15
+
+    elif search_type == "mmr":
+        base_score += 18
+
+    elif search_type == "hybrid":
+        base_score += 30
+
+    # Kaynak sayısına göre
+    source_bonus = min(len(retrieved_docs) * 3, 15)
+
+    confidence = min(base_score + source_bonus, 100)
+
+    return confidence
+
+
+def extract_source_pages(retrieved_docs):
+    pages = []
+
+    for doc in retrieved_docs:
+        text = doc.page_content
+        page_match = re.search(r"Sayfa\s+(\d+)", text)
+
+        if page_match:
+            page_number = page_match.group(1)
+            if page_number not in pages:
+                pages.append(page_number)
+
+    return pages
+
 
 st.set_page_config(
     page_title="RAG Sistem",
     page_icon="📄",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 st.title("📄 RAG Doküman Soru-Cevap Sistemi")
@@ -51,48 +97,42 @@ with st.sidebar:
         top_k = 5
         search_type = "mmr"
 
-    elif answer_mode == "Detaylı":
+    else:
         chunk_size = 800
         chunk_overlap = 200
         top_k = 8
         search_type = "mmr"
+
     manual_search_type = st.selectbox(
         "Deneysel Arama Yöntemi",
-        ["Otomatik", "keyword", "similarity", "mmr"]
-    )
+        ["Otomatik", "keyword", "similarity", "mmr", "hybrid"]    )
+
     search_explanations = {
         "Otomatik": "Seçilen cevap moduna göre sistem en uygun arama yöntemini otomatik belirler.",
-        "keyword": "Anahtar kelime araması yapar. Soru içindeki kelimeler dokümanda birebir aranır. Basittir ama anlam benzerliğini yakalayamaz.",
+        "keyword": "Anahtar kelime araması yapar. Soru içindeki kelimeler dokümanda birebir aranır.",
         "similarity": "Semantik benzerlik araması yapar. Sorunun anlamına en yakın doküman parçalarını getirir.",
-        "mmr": "MMR araması yapar. Hem alakalı hem de birbirinden farklı parçaları getirir. Uzun dokümanlarda daha kapsamlı cevaplar için daha uygundur."
+        "mmr": "MMR araması yapar. Hem alakalı hem de birbirinden farklı parçaları getirir.",
+        "hybrid" : "Keyword, similarity ve MMR sonuçlarını birleştirir. En kapsamlı ve yüksek doğruluk hedefleyen arama yöntemidir."
     }
-
 
     if manual_search_type != "Otomatik":
         search_type = manual_search_type
 
-       
-
     st.caption(f"ℹ️ {search_explanations[manual_search_type]}")
 
-
     st.info(
-        f"""
-    Cevap Modu: {answer_mode}
-    Chunk Size: {chunk_size}
-    Chunk Overlap: {chunk_overlap}
-    Top-k: {top_k}
-    Arama: {search_type}
-
-    Not: Chunk ayarları değişirse PDF'yi tekrar işlemeniz gerekir.
-    """
+        f"Cevap Modu: {answer_mode}\n"
+        f"Chunk Size: {chunk_size}\n"
+        f"Chunk Overlap: {chunk_overlap}\n"
+        f"Top-k: {top_k}\n"
+        f"Arama: {search_type}\n\n"
+        f"Not: Chunk ayarları değişirse PDF'yi tekrar işlemeniz gerekir."
     )
 
     st.header("🔑 LLM Seçimi")
     llm_option = st.radio(
         "LLM Türü",
-        ["Mock (Test)", "OpenAI API", "AWS Bedrock"],
-        help="Hangi LLM'i kullanmak istersiniz?"
+        ["Mock (Test)", "OpenAI API", "AWS Bedrock"]
     )
 
     if llm_option == "OpenAI API":
@@ -100,22 +140,18 @@ with st.sidebar:
     else:
         api_key = None
 
-# File upload section
+# Upload section
 col1, col2 = st.columns([2, 1])
 
 with col1:
     st.subheader("📥 Adım 1: Doküman Yükle")
-    uploaded_file = st.file_uploader(
-        "PDF dosyası seçin",
-        type=["pdf"],
-        key="pdf_uploader"
-    )
+    uploaded_file = st.file_uploader("PDF dosyası seçin", type=["pdf"])
 
 with col2:
     st.subheader("📊 Durum")
     if st.session_state.vector_store is not None:
         st.success(f"✅ Yüklü: {st.session_state.document_name}")
-        st.info(f"Chunkların Sayısı: {st.session_state.chunk_count}")
+        st.info(f"Chunk Sayısı: {st.session_state.chunk_count}")
     else:
         st.warning("❌ Henüz doküman yüklenmedi")
 
@@ -123,19 +159,20 @@ with col2:
 if uploaded_file is not None:
     st.subheader("📋 Adım 2: Dokümanı İşle")
 
-    if st.button("Dokümanı İşle", key="process_btn", help="PDF'i parçalara ayır ve embedding oluştur"):
+    if st.button("Dokümanı İşle"):
         try:
             with st.spinner("⏳ Doküman işleniyor..."):
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                     tmp_file.write(uploaded_file.read())
                     tmp_path = tmp_file.name
+
                 s3_result = upload_file_to_s3(tmp_path, uploaded_file.name)
 
                 if s3_result["success"]:
                     st.info(f"☁️ PDF AWS S3'e yüklendi: {s3_result['s3_uri']}")
                 else:
                     st.warning(f"⚠️ S3 yükleme başarısız: {s3_result['error']}")
-                    
+
                 result = build_index(
                     tmp_path,
                     chunk_size=chunk_size,
@@ -156,18 +193,16 @@ if uploaded_file is not None:
 
         except Exception as e:
             st.error(f"❌ Hata oluştu: {str(e)}")
-            st.info("Lütfen PDF dosyasının geçerli olduğundan emin olun.")
 
 # Question answering
 st.subheader("❓ Adım 3: Soru Sor ve Cevap Al")
 
 question = st.text_input(
     "Sorunuzu yazın",
-    placeholder="Örnek: Bu doküman hakkında ana konular nelerdir?",
-    key="question_input"
+    placeholder="Örnek: Rapor isterleri nelerdir?"
 )
 
-if st.button("Cevabını Al 🔍", key="answer_btn"):
+if st.button("Cevabını Al 🔍"):
     if st.session_state.vector_store is None:
         st.warning("⚠️ Önce PDF yükleyip işlemeniz gerekli!")
 
@@ -177,12 +212,31 @@ if st.button("Cevabını Al 🔍", key="answer_btn"):
     else:
         try:
             with st.spinner("🤔 İlgili doküman parçaları aranıyor..."):
+                question_lower = question.lower()
+
+                heading_keywords = [
+                    "ister", "isterleri", "gereksinim", "gereksinimler",
+                    "kriter", "kriterleri", "madde", "maddeler",
+                    "listele", "nelerdir", "bölüm", "başlık"
+                ]
+
+                is_heading_or_list_question = any(
+                    keyword in question_lower for keyword in heading_keywords
+                )
+
+                effective_top_k = top_k
+                effective_search_type = search_type
+
+                if is_heading_or_list_question:
+                    effective_top_k = max(top_k, 8)
+                    effective_search_type = "keyword"
+
                 retrieved_docs = ask_question(
-                st.session_state.vector_store,
-                question,
-                k=top_k,
-                search_type=search_type
-            )
+                    st.session_state.vector_store,
+                    question,
+                    k=effective_top_k,
+                    search_type=effective_search_type
+                )
 
             if not retrieved_docs:
                 st.info("Hiç sonuç bulunamadı.")
@@ -193,10 +247,7 @@ if st.button("Cevabını Al 🔍", key="answer_btn"):
 
                 with st.spinner("✍️ Cevap oluşturuluyor..."):
                     if llm_option == "Mock (Test)":
-                        answer = generate_answer_mock(
-                            question,
-                            retrieved_docs
-                        )
+                        answer = generate_answer_mock(question, retrieved_docs)
 
                     elif llm_option == "OpenAI API":
                         from src.llm_handler import generate_answer_openai
@@ -205,32 +256,40 @@ if st.button("Cevabını Al 🔍", key="answer_btn"):
                             st.error("❌ OpenAI API Key gerekli!")
                             answer = None
                         else:
-                            answer = generate_answer_openai(
-                                question,
-                                retrieved_docs,
-                                api_key
-                            )
+                            answer = generate_answer_openai(question, retrieved_docs, api_key)
 
                     elif llm_option == "AWS Bedrock":
                         from src.llm_handler import generate_answer_bedrock
+                        answer = generate_answer_bedrock(question, retrieved_docs)
 
-                        answer = generate_answer_bedrock(
-                            question,
-                            retrieved_docs
-                        )
-
-                end_time = time.time()
-                elapsed_time = end_time - start_time
+                elapsed_time = time.time() - start_time
 
                 if answer:
+                    source_pages = extract_source_pages(retrieved_docs)
+                    confidence_score = calculate_confidence(
+                    retrieved_docs,
+                    effective_search_type
+                )
+
+                    if source_pages:
+                        source_text = ", ".join([f"Sayfa {page}" for page in source_pages])
+                        answer_with_sources = (
+                            f"{answer}\n\n"
+                            f"📌 Kaynak: {source_text}\n"
+                            f"📊 Güven Skoru: %{confidence_score}"
+                        )
+                    else:
+                        answer_with_sources = answer
+
                     st.subheader("💡 Cevap")
-                    st.write(answer)
+                    st.write(answer_with_sources)
 
                     st.info(
                         f"⏱️ Cevap süresi: {elapsed_time:.2f} saniye | "
                         f"Model: {llm_option} | "
                         f"Chunk size: {chunk_size} | "
-                        f"Top-k: {top_k}"
+                        f"Top-k: {effective_top_k} | "
+                        f"Arama: {effective_search_type}"
                     )
 
                     st.session_state.experiment_logs.append({
@@ -240,8 +299,8 @@ if st.button("Cevabını Al 🔍", key="answer_btn"):
                         "Cevap Modu": answer_mode,
                         "Chunk Size": chunk_size,
                         "Chunk Overlap": chunk_overlap,
-                        "Top-k": top_k,
-                        "Arama Yöntemi": search_type,
+                        "Top-k": effective_top_k,
+                        "Arama Yöntemi": effective_search_type,
                         "Chunk Sayısı": st.session_state.chunk_count,
                         "Cevap Süresi (sn)": round(elapsed_time, 2),
                         "Kaynak Sayısı": len(retrieved_docs),
@@ -249,45 +308,59 @@ if st.button("Cevabını Al 🔍", key="answer_btn"):
                     })
 
                     with st.expander("📚 Kaynaklar", expanded=False):
-                        st.subheader("İlgili Doküman Parçaları")
+                        st.subheader("Kaynak Gösterimi")
 
-                        for i, doc in enumerate(retrieved_docs, 1):
+                        shown_pages = set()
+
+                        for i, doc in enumerate(retrieved_docs, start=1):
+                            text = doc.page_content
+
+                            page_match = re.search(r"Sayfa\s+(\d+)", text)
+                            page_number = page_match.group(1) if page_match else "Bilinmiyor"
+
+                            if page_number in shown_pages:
+                                continue
+
+                            shown_pages.add(page_number)
+
                             score = None
+                            search_method = "Bilinmiyor"
 
                             if hasattr(doc, "metadata") and doc.metadata:
                                 score = doc.metadata.get("score")
+                                search_method = doc.metadata.get("search_type", "Bilinmiyor")
 
-                            label = f"Kaynak {i}"
+                            citation_title = f"📄 Kaynak {i} | Sayfa {page_number}"
+
                             if score is not None:
-                                label += f" (skor: {score:.4f})"
+                                citation_title += f" | Skor: {score:.4f}"
 
-                            with st.expander(label):
-                                st.write(doc.page_content)
+                            with st.expander(citation_title):
+                                st.markdown(
+                                    f"""
+### 📚 Kaynak Bilgisi
 
-                                if score is not None:
-                                    st.caption(f"Skor: {score:.4f}")
-                                    if hasattr(doc, "metadata") and doc.metadata.get("search_type"):
-                                        st.caption(f"Arama Yöntemi: {doc.metadata.get('search_type')}")
-                                elif hasattr(doc, "metadata") and doc.metadata:
-                                    st.caption(f"Metadata: {doc.metadata}")
+- Sayfa: {page_number}
+- Arama Yöntemi: {search_method}
+- Chunk Uzunluğu: {len(text)} karakter
+"""
+                                )
+
+                                st.code(text[:1500], language="text")
+                                st.caption("Bu içerik retrieval aşamasında kullanılan doküman parçasıdır.")
 
         except Exception as e:
             st.error(f"❌ Cevap oluşturulurken hata: {str(e)}")
 
 # Experiment table
 if st.session_state.experiment_logs:
-    import pandas as pd
-    import matplotlib.pyplot as plt
-
     df = pd.DataFrame(st.session_state.experiment_logs)
 
     st.divider()
     st.subheader("📊 Deney Sonuçları")
 
-    st.dataframe(
-        df,
-        use_container_width=True
-    )
+    st.dataframe(df, use_container_width=True)
+
     st.subheader("✅ Son Cevap Doğruluk Değerlendirmesi")
 
     accuracy_value = st.selectbox(
@@ -296,22 +369,15 @@ if st.session_state.experiment_logs:
     )
 
     if st.button("Son Kaydı Güncelle"):
-        if st.session_state.experiment_logs:
-            st.session_state.experiment_logs[-1]["Doğruluk"] = accuracy_value
-            st.success(f"Son kayıt '{accuracy_value}' olarak güncellendi.")
-            st.rerun()
+        st.session_state.experiment_logs[-1]["Doğruluk"] = accuracy_value
+        st.success(f"Son kayıt '{accuracy_value}' olarak güncellendi.")
+        st.rerun()
 
     if len(df) > 1:
         st.subheader("📈 Cevap Süresi Grafiği")
 
         fig, ax = plt.subplots(figsize=(8, 4))
-
-        ax.plot(
-            range(len(df)),
-            df["Cevap Süresi (sn)"],
-            marker="o"
-        )
-
+        ax.plot(range(len(df)), df["Cevap Süresi (sn)"], marker="o")
         ax.set_xlabel("Test Numarası")
         ax.set_ylabel("Cevap Süresi (sn)")
         ax.set_title("RAG Sistem Performansı")
@@ -331,6 +397,5 @@ if st.session_state.experiment_logs:
         st.session_state.experiment_logs = []
         st.rerun()
 
-# Footer
 st.divider()
 st.caption("🔬 AWS Bulut Altyapısında RAG Sistemi | Lokal RAG + AWS Bedrock ✅")

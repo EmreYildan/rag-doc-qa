@@ -37,7 +37,6 @@ def keyword_search_chunks(vector_store, query, k=3):
 
         docs_with_scores = []
 
-        # FAISS içindeki tüm dokümanları al
         all_docs = list(vector_store.docstore._dict.values())
 
         for doc in all_docs:
@@ -67,14 +66,87 @@ def keyword_search_chunks(vector_store, query, k=3):
         raise Exception(f"Keyword arama hatası: {str(e)}")
 
 
+def hybrid_search_chunks(vector_store, query, k=5):
+    """
+    Hybrid retrieval:
+    Keyword + Similarity + MMR sonuçlarını birleştirir.
+    Tekrar eden chunkları temizler.
+    """
+    try:
+        combined_docs = []
+        seen_texts = set()
+
+        # 1. Keyword sonuçları
+        keyword_docs = keyword_search_chunks(
+            vector_store,
+            query,
+            k=max(2, k // 2)
+        )
+
+        # 2. Similarity sonuçları
+        similarity_results = vector_store.similarity_search_with_score(
+            query,
+            k=k
+        )
+
+        similarity_docs = []
+        for doc, score in similarity_results:
+            if not hasattr(doc, "metadata") or doc.metadata is None:
+                doc.metadata = {}
+
+            doc.metadata["score"] = float(score)
+            doc.metadata["search_type"] = "Similarity"
+            similarity_docs.append(doc)
+
+        # 3. MMR sonuçları
+        mmr_docs = vector_store.max_marginal_relevance_search(
+            query,
+            k=k,
+            fetch_k=max(k, min(k * 3, 20))
+        )
+
+        for doc in mmr_docs:
+            if not hasattr(doc, "metadata") or doc.metadata is None:
+                doc.metadata = {}
+
+            doc.metadata["score"] = None
+            doc.metadata["search_type"] = "MMR"
+
+        # Öncelik sırası: keyword → similarity → mmr
+        candidate_docs = keyword_docs + similarity_docs + mmr_docs
+
+        for doc in candidate_docs:
+            normalized_text = " ".join(doc.page_content.split())
+
+            if normalized_text not in seen_texts:
+                seen_texts.add(normalized_text)
+
+                if not hasattr(doc, "metadata") or doc.metadata is None:
+                    doc.metadata = {}
+
+                previous_type = doc.metadata.get("search_type", "")
+                doc.metadata["search_type"] = f"Hybrid ({previous_type})"
+
+                combined_docs.append(doc)
+
+            if len(combined_docs) >= k:
+                break
+
+        return combined_docs
+
+    except Exception as e:
+        raise Exception(f"Hybrid arama hatası: {str(e)}")
+
+
 def search_similar_chunks(vector_store, query, k=3, search_type="similarity"):
     """
     Vector store içinde arama yapar.
 
     search_type:
-    - similarity: en benzer doküman parçalarını getirir.
-    - mmr: hem alakalı hem birbirinden farklı doküman parçalarını getirir.
-    - keyword: klasik anahtar kelime araması yapar.
+    - keyword: klasik anahtar kelime araması
+    - similarity: semantik benzerlik araması
+    - mmr: alakalı ve farklı parçaları getirir
+    - hybrid: keyword + similarity + mmr birleşimi
     """
     try:
         if not query.strip():
@@ -92,11 +164,18 @@ def search_similar_chunks(vector_store, query, k=3, search_type="similarity"):
                 k=k
             )
 
+        elif search_type == "hybrid":
+            docs = hybrid_search_chunks(
+                vector_store,
+                query,
+                k=k
+            )
+
         elif search_type == "mmr":
             mmr_docs = vector_store.max_marginal_relevance_search(
                 query,
                 k=k,
-                fetch_k=max(k * 3, 10)
+                fetch_k=max(k, min(k * 3, 20))
             )
 
             for doc in mmr_docs:

@@ -98,7 +98,7 @@ Yukarıdaki bilgilere dayanarak soruyu Türkçe olarak cevapla."""
 
 def generate_answer_bedrock(question: str, retrieved_docs: list) -> str:
     """
-    AWS Bedrock Claude 3 Haiku ile cevap üretir.
+    AWS Bedrock Claude ile cevap üretir.
     """
 
     try:
@@ -111,7 +111,7 @@ def generate_answer_bedrock(question: str, retrieved_docs: list) -> str:
         if not retrieved_docs:
             return "Bu soruya uygun kaynak bulunamadı."
 
-        # .env ayarları
+        # AWS ayarları
         region = os.getenv("AWS_REGION", "eu-west-1")
 
         model_id = os.getenv(
@@ -119,38 +119,86 @@ def generate_answer_bedrock(question: str, retrieved_docs: list) -> str:
             "anthropic.claude-3-haiku-20240307-v1:0"
         )
 
-        max_tokens = int(os.getenv("BEDROCK_MAX_TOKENS", "200"))
-        temperature = float(os.getenv("BEDROCK_TEMPERATURE", "0.2"))
+        max_tokens = int(
+            os.getenv("BEDROCK_MAX_TOKENS", "600")
+        )
+
+        temperature = float(
+            os.getenv("BEDROCK_TEMPERATURE", "0.1")
+        )
 
         # Context oluştur
         context_parts = []
 
-        for i, doc in enumerate(retrieved_docs[:3], start=1):
+        for i, doc in enumerate(retrieved_docs[:8], start=1):
 
             text = " ".join(doc.page_content.split())
 
             context_parts.append(
-                f"Kaynak {i}:\n{text[:2000]}"
+                f"Kaynak {i}:\n{text[:3000]}"
             )
 
         context = "\n\n".join(context_parts)
 
+        # Liste / başlık sorusu algılama
+        question_lower = question.lower()
+
+        list_question_keywords = [
+            "nelerdir",
+            "listele",
+            "maddeler",
+            "kriterler",
+            "isterler",
+            "gereksinimler",
+            "başlıklar",
+            "hangi maddeler",
+            "hangi kriterler"
+        ]
+
+        is_list_question = any(
+            keyword in question_lower
+            for keyword in list_question_keywords
+        )
+
+        extra_instruction = ""
+
+        if is_list_question:
+            extra_instruction = """
+ÖNEMLİ:
+- Eğer dokümanda maddeler veya liste varsa eksiksiz aktar.
+- Özetleme yapma.
+- Madde atlama.
+- Numara sırasını koru.
+- Listeyi birebir çıkarmaya çalış.
+- Yalnızca dokümanda bulunan bilgileri kullan.
+"""
+
         # Prompt
         prompt = f"""
-Kurallar:
-- Sadece verilen doküman bilgilerine dayan.
-- Eğer cevap dokümanda yoksa bunu açıkça belirt.
-- Dokümanda numaralı veya maddeli bir liste varsa, listedeki tüm maddeleri eksiksiz aktar.
-- Liste sorularında madde atlama, özetleme yapma.
-- Cevabı dokümandaki sıraya göre ver.
-- Bilgi eksik görünüyorsa "Bağlamda yalnızca şu maddeler bulunuyor" diye belirt.
+        Sen bir akademik doküman analiz sistemisin.
 
-Doküman:
-{context}
+        Kurallar:
+        - Cevabı Türkçe ver.
+        - Cevabı iki ana bölüm halinde ver:
+        1. Dokümandaki Bilgi
+        2. Ek Açıklama
+        - "Dokümandaki Bilgi" bölümünde yalnızca verilen doküman içeriğine dayan.
+        - Dokümanda olmayan bilgileri bu bölümde yazma.
+        - Eğer dokümanda bilgi yoksa açıkça "Bu bilgi dokümanda bulunamadı." de.
+        - "Ek Açıklama" bölümünde konuyu daha anlaşılır hale getiren kısa açıklamalar yapabilirsin.
+        - Ek açıklamada verdiğin bilgilerin dokümanda doğrudan geçmeyebileceğini belli et.
+        - Teknik başlıkları ve maddeleri koru.
+        - Eğer soru liste/madde sorusuysa dokümandaki maddeleri eksiksiz aktar.
+        - Gereksiz uzun yorum yapma.
 
-Soru:
-{question}
-"""
+        {extra_instruction}
+
+        Doküman İçeriği:
+        {context}
+
+        Soru:
+        {question}
+        """
 
         # Bedrock client
         client = boto3.client(
@@ -158,7 +206,7 @@ Soru:
             region_name=region
         )
 
-        # Model çağrısı
+        # Claude çağrısı
         response = client.converse(
             modelId=model_id,
             messages=[
