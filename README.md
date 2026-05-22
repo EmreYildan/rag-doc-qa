@@ -586,6 +586,9 @@ AWS_S3_BUCKET_NAME=<bucket-name>
 
 Projeyi test etmek için kullanılan PDF:
 
+## Sample PDF
+
+https://github.com/KULLANICI_ADI/REPO_ADI/blob/main/data/sample_pdfs/hukuk.pdf
 
 [PDF'i Aç](data/sample_pdfs/Resmi_Gazete.pdf)
 
