@@ -588,7 +588,7 @@ Projeyi test etmek için kullanılan PDF:
 
 ## Sample PDF
 
-https://github.com/EmreYildan/rag-doc-qa.git/blob/main/data/sample_pdfs/Resmi_Gazete.pdf
+[PDF'i Aç](https://github.com/EmreYildan/rag-doc-qa/blob/main/data/sample_pdfs/Resmi_Gazete.pdf)
 
 [PDF'i Aç](data/sample_pdfs/Resmi_Gazete.pdf)
 
